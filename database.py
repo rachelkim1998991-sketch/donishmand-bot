@@ -105,3 +105,66 @@ async def get_pending_quote(pool, quote_id):
 async def delete_pending_quote(pool, quote_id):
     async with pool.acquire() as conn:
         await conn.execute('DELETE FROM pending_quotes WHERE id = $1;', quote_id)
+
+
+# --- FOYDALANUVCHILARNI HISOBLASH FUNKSIYALARI ---
+
+async def init_db(pool):
+    async with pool.acquire() as conn:
+        # Mavjud quotes va pending_quotes jadvallari (kod o'zgarmaydi)
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS quotes (
+            id SERIAL PRIMARY KEY,
+            text TEXT NOT NULL,
+            author VARCHAR(100) DEFAULT 'Noma''lum',
+            category VARCHAR(50) DEFAULT 'hikmat'
+        );
+        ''')
+        await conn.execute('''
+        ALTER TABLE quotes ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'hikmat';
+        ''')
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_quotes (
+            id SERIAL PRIMARY KEY,
+            text TEXT NOT NULL,
+            user_id BIGINT NOT NULL,
+            user_name VARCHAR(150)
+        );
+        ''')
+
+        # YANGI: Foydalanuvchilar jadvali
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            user_name VARCHAR(150),
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        ''')
+
+        # Eski quotes yuklash kodi (o'zgarmaydi)
+        count = await conn.fetchval('SELECT COUNT(*) FROM quotes')
+        if count == 0:
+            quotes = [
+                ("Ilm qaytarish bilan, amal ixlos bilan tirikdir.", "Alisher Navoiy", "hikmat"),
+                ("Muvaffaqiyat kaliti — xatolardan qo'rqmaslikda.", "Donishmand", "hikmat"),
+                ("Eng katta g'alaba — o'z nafsi ustidan qozonilgan g'alabadir.", "Donishmand", "hikmat"),
+                ("Yiqilish — bu mag'lubiyat emas. Turishdan bosh tortish — mag'lubiyatdir!", "Noma'lum", "motivatsiya"),
+                ("Bugun bajarmasangiz, ertaga orzularingiz boshqalariki bo'ladi. Hozir boshlang!", "Donishmand", "motivatsiya")
+            ]
+            await conn.executemany('INSERT INTO quotes (text, author, category) VALUES ($1, $2, $3);', quotes)
+
+
+async def add_user_if_not_exists(pool, user_id, user_name):
+    """Yangi foydalanuvchini bazaga qo'shish (agar oldin kirmagan bo'lsa)"""
+    async with pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO users (user_id, user_name) 
+            VALUES ($1, $2) 
+            ON CONFLICT (user_id) DO NOTHING;
+        ''', user_id, user_name)
+
+
+async def get_users_count(pool):
+    """Jami foydalanuvchilar sonini hisoblash"""
+    async with pool.acquire() as conn:
+        return await conn.fetchval('SELECT COUNT(*) FROM users;')
