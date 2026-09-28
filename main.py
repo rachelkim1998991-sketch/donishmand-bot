@@ -1,3 +1,4 @@
+import time
 import asyncio
 import logging
 import os
@@ -19,6 +20,8 @@ from database import (
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+
+LAST_ACTIVITY_TIME = time.time()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -94,7 +97,13 @@ async def main():
 
     @dp.message(CommandStart())
     async def command_start_handler(message: Message, state: FSMContext) -> None:
+        global LAST_ACTIVITY_TIME
         await state.clear()
+
+        current_time = time.time()
+        bot_was_sleeping = (current_time - LAST_ACTIVITY_TIME) > 300
+
+        LAST_ACTIVITY_TIME = current_time
 
         try:
             await add_user_if_not_exists(db_pool, message.from_user.id, message.from_user.full_name)
@@ -107,7 +116,15 @@ async def main():
             logging.error(f"Bazadan hikmat olishda xato: {e}")
             quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
 
-        welcome_text = f"Assalomu alaykum, {html.bold(message.from_user.full_name)}!\n\n"
+        welcome_text = ""
+
+        if bot_was_sleeping:
+            welcome_text += (
+                f"😴 {html.italic('Uyg`onish jarayoni muvaffaqiyatli yakunlandi!')}\n"
+                f"Uxlab qolgandim 😁 Meni uyg`otganingiz uchun rahmat! ✨\n\n"
+            )
+
+        welcome_text += f"Assalomu alaykum, {html.bold(message.from_user.full_name)}!\n\n"
         welcome_text += f"Kun hikmati:\n{quote}"
 
         await message.answer(
