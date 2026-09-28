@@ -36,12 +36,14 @@ class AdminEditStates(StatesGroup):
 def get_user_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🎲 Tasodifiy hikmat", callback_data="get_random_quote")
+        InlineKeyboardButton(text="🎲 Tasodifiy hikmat", callback_data="get_random_quote"),
+        InlineKeyboardButton(text="🔥 Motivatsiya", callback_data="get_motivation") # Yonma-yon chiqadi
     )
     builder.row(
         InlineKeyboardButton(text="✍️ Aqlli gap qo'shish", callback_data="suggest_quote")
     )
     return builder.as_markup()
+
 
 
 def get_approval_keyboard(quote_id: int) -> InlineKeyboardMarkup:
@@ -73,7 +75,7 @@ async def main():
     async def command_start_handler(message: Message, state: FSMContext) -> None:
         await state.clear()
         try:
-            quote = await get_random_quote(db_pool)
+            quote = await get_random_quote(db_pool, category="hikmat")
         except Exception as e:
             logging.error(f"Bazadan hikmat olishda xato: {e}")
             quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
@@ -90,7 +92,7 @@ async def main():
     @dp.callback_query(F.data == "get_random_quote")
     async def callback_random_quote(callback: CallbackQuery):
         try:
-            quote = await get_random_quote(db_pool)
+            quote = await get_random_quote(db_pool, category="hikmat")
         except Exception:
             quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
 

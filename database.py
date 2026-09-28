@@ -22,13 +22,19 @@ async def create_db_pool():
 
 async def init_db(pool):
     async with pool.acquire() as conn:
-        # Asosiy hikmatlar jadvali
+        # Asosiy hikmatlar jadvaliga category ustuni qo'shildi
         await conn.execute('''
         CREATE TABLE IF NOT EXISTS quotes (
             id SERIAL PRIMARY KEY,
             text TEXT NOT NULL,
-            author VARCHAR(100) DEFAULT 'Noma''lum'
+            author VARCHAR(100) DEFAULT 'Noma''lum',
+            category VARCHAR(50) DEFAULT 'hikmat'
         );
+        ''')
+
+        # Agar jadval oldindan bor bo'lsa va category ustuni bo'lmasa, uni qo'shish (Xavfsizlik uchun)
+        await conn.execute('''
+        ALTER TABLE quotes ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'hikmat';
         ''')
 
         # Admin tasdiqlashini kutayotgan takliflar jadvali
@@ -43,21 +49,29 @@ async def init_db(pool):
 
         count = await conn.fetchval('SELECT COUNT(*) FROM quotes')
         if count == 0:
+            # Boshlang'ich ma'lumotlar (Kategoriyalari bilan)
             quotes = [
-                ("Ilm qaytarish bilan, amal ixlos bilan tirikdir.", "Alisher Navoiy"),
-                ("Muvaffaqiyat kaliti — xatolardan qo'rqmaslikda.", "Donishmand"),
-                ("Vaqt — bu sizning hayotingiz. Uni bekorchi narsalarga sarflamang.", "Noma'lum"),
-                ("Eng katta g'alaba — o'z nafsi ustidan qozonilgan g'alabadir.", "Donishmand"),
-                ("Kuchsizlar hech qachon kechira olmaydilar. Kechirimli bo'lish kuchlilarga xosdir.", "Mahatma Gandi")
+                ("Ilm qaytarish bilan, amal ixlos bilan tirikdir.", "Alisher Navoiy", "hikmat"),
+                ("Muvaffaqiyat kaliti — xatolardan qo'rqmaslikda.", "Donishmand", "hikmat"),
+                ("Eng katta g'alaba — o'z nafsi ustidan qozonilgan g'alabadir.", "Donishmand", "hikmat"),
+                # Motivatsiya uchun yangi gaplar:
+                ("Yiqilish — bu mag'lubiyat emas. Turishdan bosh tortish — mag'lubiyatdir!", "Noma'lum", "motivatsiya"),
+                ("Bugun bajarmasangiz, ertaga orzularingiz boshqalariki bo'ladi. Hozir boshlang!", "Donishmand", "motivatsiya"),
+                ("Chegaralar faqat sizning miyangizda mavjud. Siz o'ylaganingizdan ham kuchlisiz!", "Noma'lum", "motivatsiya"),
+                ("Muvaffaqiyat har kuni takrorlanadigan kichik harakatlarning yig'indisidir.", "Robert Koler", "motivatsiya")
             ]
             await conn.executemany(
-                'INSERT INTO quotes (text, author) VALUES ($1, $2);', quotes
+                'INSERT INTO quotes (text, author, category) VALUES ($1, $2, $3);', quotes
             )
 
 
-async def get_random_quote(pool):
+async def get_random_quote(pool, category="hikmat"):
+    """Kategoriya bo'yicha tasodifiy xabar olish"""
     async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT text, author FROM quotes ORDER BY RANDOM() LIMIT 1;')
+        row = await conn.fetchrow(
+            'SELECT text, author FROM quotes WHERE category = $1 ORDER BY RANDOM() LIMIT 1;',
+            category
+        )
         if row:
             return f"«{row['text']}»\n\n✍️ — {row['author']}"
         return None
@@ -68,15 +82,16 @@ async def get_quotes_count(pool):
         return await conn.fetchval('SELECT COUNT(*) FROM quotes;')
 
 
-async def add_new_quote(pool, text, author):
+async def add_new_quote(pool, text, author, category="hikmat"):
+    """Yangi gap qo'shishda kategoriya ham saqlanadi"""
     async with pool.acquire() as conn:
-        await conn.execute('INSERT INTO quotes (text, author) VALUES ($1, $2);', text, author)
+        await conn.execute(
+            'INSERT INTO quotes (text, author, category) VALUES ($1, $2, $3);',
+            text, author, category
+        )
 
-
-# --- YANGI QO'SHILGAN FUNKSIYALAR ---
 
 async def add_pending_quote(pool, text, user_id, user_name):
-    """Foydalanuvchi taklif qilgan gapni vaqtincha saqlash"""
     async with pool.acquire() as conn:
         return await conn.fetchval(
             'INSERT INTO pending_quotes (text, user_id, user_name) VALUES ($1, $2, $3) RETURNING id;',
@@ -84,11 +99,9 @@ async def add_pending_quote(pool, text, user_id, user_name):
         )
 
 async def get_pending_quote(pool, quote_id):
-    """ID bo'yicha taklif qilingan gapni olish"""
     async with pool.acquire() as conn:
         return await conn.fetchrow('SELECT text, user_id FROM pending_quotes WHERE id = $1;', quote_id)
 
 async def delete_pending_quote(pool, quote_id):
-    """Tasdiqlangan yoki rad etilgan gapni vaqtinchalik jadvaldan o'chirish"""
     async with pool.acquire() as conn:
         await conn.execute('DELETE FROM pending_quotes WHERE id = $1;', quote_id)
