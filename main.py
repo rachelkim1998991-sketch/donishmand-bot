@@ -425,13 +425,28 @@ async def main():
 
         print("Donishmand-bot admin panel bilan ishga tushdi...")
         try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind(('0.0.0.0', int(os.getenv("PORT", 8080))))
-            s.listen(1)
-            logging.info("Render port muvaffaqiyatli band qilindi.")
+            import threading
+            from http.server import BaseHTTPRequestHandler, HTTPServer
+
+            class HealthCheckHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"Bot is alive!")
+
+                def log_message(self, format, *args):
+                    return  
+
+            def run_health_server():
+                port = int(os.getenv("PORT", 8080))
+                server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+                logging.info(f"Render uchun veb-server {port} portida muvaffaqiyatli ishga tushdi.")
+                server.serve_forever()
+
+            threading.Thread(target=run_health_server, daemon=True).start()
         except Exception as e:
-            logging.error(f"Port ochishda xato: {e}")
+            logging.error(f"Veb-serverni yuklashda xato: {e}")
 
         try:
             await bot.delete_webhook(drop_pending_updates=True)
