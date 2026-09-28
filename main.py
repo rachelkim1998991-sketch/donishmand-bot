@@ -425,11 +425,27 @@ async def main():
 
         print("Donishmand-bot admin panel bilan ishga tushdi...")
         try:
+            from aiohttp import web
+            async def handle(request):
+                return web.Response(text="Bot ishlamoqda!")
+
+            app = web.Application()
+            app.router.add_get('/', handle)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            port = int(os.getenv("PORT", 8080))
+            site = web.TCPSite(runner, '0.0.0.0', port)
+            await site.start()
+            logging.info(f"Render uchun veb-server {port} portida ishga tushdi.")
+        except Exception as e:
+            logging.error(f"Veb-serverni yuklashda xato (lekin bot ishlashda davom etadi): {e}")
+
+        try:
             await bot.delete_webhook(drop_pending_updates=True)
             await dp.start_polling(bot)
         finally:
             await db_pool.close()
 
-    if __name__ == "__main__":
-        asyncio.run(main())
+        if __name__ == "__main__":
+            asyncio.run(main())
 
