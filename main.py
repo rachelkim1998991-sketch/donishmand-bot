@@ -1,7 +1,10 @@
-import time
 import asyncio
 import logging
 import os
+import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardButton, CallbackQuery, InlineKeyboardMarkup
@@ -16,28 +19,25 @@ from database import (
     add_user_if_not_exists, get_users_count
 )
 
-
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
-LAST_ACTIVITY_TIME = time.time()
-
 logging.basicConfig(level=logging.INFO)
 
+LAST_ACTIVITY_TIME = time.time()
 
 class QuoteSuggestion(StatesGroup):
     waiting_for_text = State()
     waiting_for_category = State()
 
-
 class AddQuoteStates(StatesGroup):
     waiting_for_text = State()
     waiting_for_author = State()
 
-
 class AdminEditStates(StatesGroup):
     waiting_for_edited_text = State()
+
 
 
 def get_user_keyboard() -> InlineKeyboardMarkup:
@@ -51,7 +51,6 @@ def get_user_keyboard() -> InlineKeyboardMarkup:
     )
     return builder.as_markup()
 
-
 def get_category_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -59,7 +58,6 @@ def get_category_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔥 Motivatsiya", callback_data="set_cat_motivatsiya")
     )
     return builder.as_markup()
-
 
 def get_approval_keyboard(quote_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -72,7 +70,6 @@ def get_approval_keyboard(quote_id: int) -> InlineKeyboardMarkup:
     )
     return builder.as_markup()
 
-
 def get_admin_edit_category_keyboard(quote_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -81,12 +78,32 @@ def get_admin_edit_category_keyboard(quote_id: int) -> InlineKeyboardMarkup:
     )
     return builder.as_markup()
 
-
 def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"))
     builder.row(InlineKeyboardButton(text="➕ Yangi gap qo'shish", callback_data="admin_add"))
     return builder.as_markup()
+
+
+# --- RENDER HEALTH CHECK SERVER ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+    def log_message(self, format, *args):
+        return
+
+def run_health_server():
+    port = int(os.getenv("PORT", 8080))
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        logging.info(f"Render uchun veb-server {port} portida muvaffaqiyatli ishga tushdi.")
+        server.serve_forever()
+    except Exception as e:
+        logging.error(f"Veb-server portini ochishda xato: {e}")
 
 
 async def main():
@@ -95,6 +112,19 @@ async def main():
     db_pool = await create_db_pool()
     await init_db(db_pool)
 
+    # Veb-serverni fonda ishga tushiramiz
+    threading.Thread(target=run_health_server, daemon=True).start()
+
+    try:
+        await bot.set_my_description(
+            description="🧠 Donishmand botiga xush kelibsiz!\n\n"
+                        "Bu bot sizga dunyo donishmandlarining eng sara hikmatli gaplarini va "
+                        "ruhingizni ko'taruvchi 🔥 Motivatsiyalarni taqdim etadi.\n\n"
+                        "Botni ishga tushirish va kun hikmatini o'qish uchun pastdagi start tugmasini bosing! 👇"
+        )
+    except Exception as e:
+        logging.error(f"Bot tavsifini o'rnatishda xato: {e}")
+
     @dp.message(CommandStart())
     async def command_start_handler(message: Message, state: FSMContext) -> None:
         global LAST_ACTIVITY_TIME
@@ -102,7 +132,6 @@ async def main():
 
         current_time = time.time()
         bot_was_sleeping = (current_time - LAST_ACTIVITY_TIME) > 300
-
         LAST_ACTIVITY_TIME = current_time
 
         try:
@@ -117,11 +146,10 @@ async def main():
             quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
 
         welcome_text = ""
-
         if bot_was_sleeping:
             welcome_text += (
                 f"😴 {html.italic('Uyg`onish jarayoni muvaffaqiyatli yakunlandi!')}\n"
-                f"Uxlab qolgandim 😁 Meni uyg`otganingiz uchun rahmat! ✨\n\n"
+                f"Botingiz biroz uxlab qolgan edi. Meni uyg`otganingiz uchun rahmat! ✨\n\n"
             )
 
         welcome_text += f"Assalomu alaykum, {html.bold(message.from_user.full_name)}!\n\n"
@@ -135,6 +163,8 @@ async def main():
 
     @dp.callback_query(F.data == "get_random_quote")
     async def callback_random_quote(callback: CallbackQuery):
+        global LAST_ACTIVITY_TIME
+        LAST_ACTIVITY_TIME = time.time()
         try:
             quote = await get_random_quote(db_pool, category="hikmat")
         except Exception:
@@ -153,6 +183,8 @@ async def main():
 
     @dp.callback_query(F.data == "get_motivation")
     async def callback_motivation(callback: CallbackQuery):
+        global LAST_ACTIVITY_TIME
+        LAST_ACTIVITY_TIME = time.time()
         try:
             quote = await get_random_quote(db_pool, category="motivatsiya")
         except Exception:
@@ -172,7 +204,6 @@ async def main():
         except Exception:
             pass
         await callback.answer()
-
 
     @dp.callback_query(F.data == "suggest_quote")
     async def start_suggestion(callback: CallbackQuery, state: FSMContext):
@@ -226,7 +257,6 @@ async def main():
         )
         await callback.answer()
 
-
     @dp.callback_query(F.data.startswith("approve_"))
     async def approve_quote_handler(callback: CallbackQuery):
         quote_id = int(callback.data.split("_")[1])
@@ -279,181 +309,154 @@ async def main():
             pass
         await callback.answer()
 
-        @dp.callback_query(F.data.startswith("edit_req_"))
-        async def request_edit_handler(callback: CallbackQuery, state: FSMContext):
-            quote_id = int(callback.data.split("_")[1])
-            pending = await get_pending_quote(db_pool, quote_id)
-            if not pending:
-                await callback.message.edit_text("❌ Bu taklif topilmadi.")
-                return
+    @dp.callback_query(F.data.startswith("edit_req_"))
+    async def request_edit_handler(callback: CallbackQuery, state: FSMContext):
+        quote_id = int(callback.data.split("_")[2])
+        pending = await get_pending_quote(db_pool, quote_id)
+        if not pending:
+            await callback.message.edit_text("❌ Bu taklif topilmadi.")
+            return
 
-            await state.set_state(AdminEditStates.waiting_for_edited_text)
-            await state.update_data(edit_quote_id=quote_id, admin_message_id=callback.message.message_id)
+        await state.set_state(AdminEditStates.waiting_for_edited_text)
+        await state.update_data(edit_quote_id=quote_id, admin_message_id=callback.message.message_id)
 
-            await callback.message.answer("✏️ Yangi matnni yuboring (yoki bekor qilish uchun /cancel):")
-            await callback.answer()
+        await callback.message.answer("✏️ Yangi matnni yuboring (yoki bekor qilish uchun /cancel):")
+        await callback.answer()
 
-        @dp.message(AdminEditStates.waiting_for_edited_text)
-        async def process_edited_text(message: Message, state: FSMContext):
-            if message.text == "/cancel":
-                await state.clear()
-                await message.answer("Tahrirlash bekor qilindi.")
-                return
-
-            new_text = message.text
-            data = await state.get_data()
-            quote_id = data.get("edit_quote_id")
-
-            pending = await get_pending_quote(db_pool, quote_id)
-            if not pending:
-                await message.answer("❌ Xatolik: Taklif topilmadi.")
-                await state.clear()
-                return
-
-            await state.update_data(final_text=new_text, orig_quote_id=quote_id)
-            await message.answer(
-                text=f"✏️ Yangi matn qabul qilindi:\n\n«{new_text}»\n\nUni qaysi bo'limga qo'shmoqchisiz?",
-                reply_markup=get_admin_edit_category_keyboard(quote_id)
-            )
-
-        @dp.callback_query(F.data.startswith("save_edit_"))
-        async def save_edited_quote_final(callback: CallbackQuery, state: FSMContext):
-            parts = callback.data.split("_")
-            quote_id = int(parts[2])
-            category = parts[3]
-
-            pending = await get_pending_quote(db_pool, quote_id)
-            if not pending:
-                await callback.message.edit_text("❌ Xatolik: Taklif topilmadi.")
-                await state.clear()
-                return
-
-            user_data = await state.get_data()
-            final_text = user_data.get("final_text", pending['text'])
+    @dp.message(AdminEditStates.waiting_for_edited_text)
+    async def process_edited_text(message: Message, state: FSMContext):
+        if message.text == "/cancel":
             await state.clear()
+            await message.answer("Tahrirlash bekor qilindi.")
+            return
 
-            await add_new_quote(db_pool, final_text, "Foydalanuvchi taklifi (Tahrirlandi)", category)
-            await delete_pending_quote(db_pool, quote_id)
+        new_text = message.text
+        data = await state.get_data()
+        quote_id = data.get("edit_quote_id")
 
-            await callback.message.edit_text(f"✅ Hikmat tahrirlandi va [{category.upper()}] bo'limiga qo'shildi!")
-
-            try:
-                await callback.bot.send_message(
-                    chat_id=pending['user_id'],
-                    text=f"🎉 Xushxabar! Siz taklif qilgan gap admin tomonidan tahrirlanib, botga qo'shildi!",
-                    reply_markup=get_user_keyboard()
-                )
-            except Exception:
-                pass
-            await callback.answer()
-
-        @dp.message(Command("admin"))
-        async def admin_panel_handler(message: Message, state: FSMContext):
-            if message.from_user.id != ADMIN_ID:
-                await message.answer("Siz ushbu bot administratori emassiz ❌")
-                return
+        pending = await get_pending_quote(db_pool, quote_id)
+        if not pending:
+            await message.answer("❌ Xatolik: Taklif topilmadi.")
             await state.clear()
-            await message.answer(
-                text="👑 Donishmand-bot Admin paneliga xush kelibsiz!\nKerakli bo'limni tanlang:",
-                reply_markup=get_admin_keyboard()
-            )
+            return
 
-        @dp.callback_query(F.data == "admin_stats")
-        async def show_stats(callback: CallbackQuery):
-            if callback.from_user.id != ADMIN_ID:
-                await callback.answer("Ruxsat berilmagan", show_alert=True)
-                return
+        await state.update_data(final_text=new_text, orig_quote_id=quote_id)
+        await message.answer(
+            text=f"✏️ Yangi matn qabul qilindi:\n\n«{new_text}»\n\nUni qaysi bo'limga qo'shmoqchisiz?",
+            reply_markup=get_admin_edit_category_keyboard(quote_id)
+        )
 
-            quotes_count = await get_quotes_count(db_pool)
-            users_count = await get_users_count(db_pool)
+    @dp.callback_query(F.data.startswith("save_edit_"))
+    async def save_edited_quote_final(callback: CallbackQuery, state: FSMContext):
+        parts = callback.data.split("_")
+        quote_id = int(parts[2])
+        category = parts[3]
 
-            stat_text = (
-                f"📊 {html.bold('Bot Statistikasi:')}\n\n"
-                f"👤 Jami obunachilar (userlar) soni: {html.bold(users_count)} ta\n"
-                f"📚 Bazadagi jami hikmatlar soni: {html.bold(quotes_count)} ta"
-            )
-
-            await callback.message.edit_text(
-                text=stat_text,
-                parse_mode="HTML",
-                reply_markup=get_admin_keyboard()
-            )
-            await callback.answer()
-
-        @dp.callback_query(F.data == "admin_add")
-        async def start_add_quote(callback: CallbackQuery, state: FSMContext):
-            if callback.from_user.id != ADMIN_ID:
-                await callback.answer("Ruxsat berilmagan", show_alert=True)
-                return
-            await state.set_state(AddQuoteStates.waiting_for_text)
-            await callback.message.answer(
-                text="✍️ Hikmatli gap matnini yuboring (Yoki bekor qilish uchun /cancel):")
-            await callback.answer()
-
-        @dp.message(Command("cancel"))
-        async def cancel_handler(message: Message, state: FSMContext):
-            current_state = await state.get_state()
-            if current_state is None:
-                return
+        pending = await get_pending_quote(db_pool, quote_id)
+        if not pending:
+            await callback.message.edit_text("❌ Xatolik: Taklif topilmadi.")
             await state.clear()
-            await message.answer("Jarayon bekor qilindi ❌", reply_markup=get_admin_keyboard())
+            return
 
-        @dp.message(AddQuoteStates.waiting_for_text)
-        async def process_quote_text(message: Message, state: FSMContext):
-            if message.text == "/cancel":
-                return
-            await state.update_data(quote_text=message.text)
-            await state.set_state(AddQuoteStates.waiting_for_author)
-            await message.answer(
-                text="✍️ Endi ushbu gap muallifini yuboring (Agar noma'lum bo'lsa 'Noma'lum' deb yozing):")
+        user_data = await state.get_data()
+        final_text = user_data.get("final_text", pending['text'])
+        await state.clear()
 
-        @dp.message(AddQuoteStates.waiting_for_author)
-        async def process_quote_author(message: Message, state: FSMContext):
-            if message.text == "/cancel":
-                return
-            author = message.text
-            user_data = await state.get_data()
-            text = user_data.get("quote_text")
+        await add_new_quote(db_pool, final_text, "Foydalanuvchi taklifi (Tahrirlandi)", category)
+        await delete_pending_quote(db_pool, quote_id)
 
-            await add_new_quote(db_pool, text, author, "hikmat")
-            await state.clear()
-
-            await message.answer(
-                text=f"✅ Yangi hikmat muvaffaqiyatli bazaga qo'shildi!\n\n«{text}» — {author}",
-                reply_markup=get_admin_keyboard()
-            )
-
-        print("Donishmand-bot admin panel bilan ishga tushdi...")
-        try:
-            import threading
-            from http.server import BaseHTTPRequestHandler, HTTPServer
-
-            class HealthCheckHandler(BaseHTTPRequestHandler):
-                def do_GET(self):
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/plain")
-                    self.end_headers()
-                    self.wfile.write(b"Bot is alive!")
-
-                def log_message(self, format, *args):
-                    return  
-
-            def run_health_server():
-                port = int(os.getenv("PORT", 8080))
-                server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-                logging.info(f"Render uchun veb-server {port} portida muvaffaqiyatli ishga tushdi.")
-                server.serve_forever()
-
-            threading.Thread(target=run_health_server, daemon=True).start()
-        except Exception as e:
-            logging.error(f"Veb-serverni yuklashda xato: {e}")
+        await callback.message.edit_text(f"✅ Hikmat tahrirlandi va [{category.upper()}] bo'limiga qo'shildi!")
 
         try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            await dp.start_polling(bot)
-        finally:
-            await db_pool.close()
+            await callback.bot.send_message(
+                chat_id=pending['user_id'],
+                text=f"🎉 Xushxabar! Siz taklif qilgan gap admin tomonidan tahrirlanib, botga qo'shildi!",
+                reply_markup=get_user_keyboard()
+            )
+        except Exception:
+            pass
+        await callback.answer()
 
-    if __name__ == "__main__":
-        asyncio.run(main())
+    @dp.message(Command("admin"))
+    async def admin_panel_handler(message: Message, state: FSMContext):
+        if message.from_user.id != ADMIN_ID:
+            await message.answer("Siz ushbu bot administratori emassiz ❌")
+            return
+        await state.clear()
+        await message.answer(
+            text="👑 Donishmand-bot Admin paneliga xush kelibsiz!\nKerakli bo'limni tanlang:",
+            reply_markup=get_admin_keyboard()
+        )
 
+    @dp.callback_query(F.data == "admin_stats")
+    async def show_stats(callback: CallbackQuery):
+        if callback.from_user.id != ADMIN_ID:
+            await callback.answer("Ruxsat berilmagan", show_alert=True)
+            return
+        quotes_count = await get_quotes_count(db_pool)
+        users_count = await get_users_count(db_pool)
+
+        stat_text = (
+            f"📊 {html.bold('Bot Statistikasi:')}\n\n"
+            f"👤 Jami obunachilar soni: {html.bold(users_count)} ta\n"
+            f"📚 Bazadagi jami hikmatlar soni: {html.bold(quotes_count)} ta"
+        )
+        await callback.message.edit_text(
+            text=stat_text,
+            parse_mode="HTML",
+            reply_markup=get_admin_keyboard()
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data == "admin_add")
+    async def start_add_quote(callback: CallbackQuery, state: FSMContext):
+        if callback.from_user.id != ADMIN_ID:
+            await callback.answer("Ruxsat berilmagan", show_alert=True)
+            return
+        await state.set_state(AddQuoteStates.waiting_for_text)
+        await callback.message.answer(
+            text="✍️ Hikmatli gap matnini yuboring (Yoki bekor qilish uchun /cancel):")
+        await callback.answer()
+
+    @dp.message(Command("cancel"))
+    async def cancel_handler(message: Message, state: FSMContext):
+        current_state = await state.get_state()
+        if current_state is None:
+            return
+        await state.clear()
+        await message.answer("Jarayon bekor qilindi ❌", reply_markup=get_admin_keyboard())
+
+    @dp.message(AddQuoteStates.waiting_for_text)
+    async def process_quote_text(message: Message, state: FSMContext):
+        if message.text == "/cancel":
+            return
+        await state.update_data(quote_text=message.text)
+        await state.set_state(AddQuoteStates.waiting_for_author)
+        await message.answer(text="✍️ Endi ushbu gap muallifini yuboring (Agar noma'lum bo'lsa 'Noma'lum' deb yozing):")
+
+    @dp.message(AddQuoteStates.waiting_for_author)
+    async def process_quote_author(message: Message, state: FSMContext):
+        if message.text == "/cancel":
+            return
+        author = message.text
+        user_data = await state.get_data()
+        text = user_data.get("quote_text")
+
+        await add_new_quote(db_pool, text, author, "hikmat")
+        await state.clear()
+
+        await message.answer(
+            text=f"✅ Yangi hikmat muvaffaqiyatli bazaga qo'shildi!\n\n«{text}» — {author}",
+            reply_markup=get_admin_keyboard()
+        )
+
+    print("Donishmand-bot admin panel bilan ishga tushdi...")
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await db_pool.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
