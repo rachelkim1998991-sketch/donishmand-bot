@@ -107,13 +107,12 @@ def run_health_server():
 
 
 async def main():
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     db_pool = await create_db_pool()
     await init_db(db_pool)
-
-    # Veb-serverni fonda ishga tushiramiz
-    threading.Thread(target=run_health_server, daemon=True).start()
 
     try:
         await bot.set_my_description(

@@ -12,11 +12,14 @@ DB_HOST = os.getenv("DB_HOST")
 
 
 async def create_db_pool():
+    # Lokal bazada SSL kerak emas, Neon'da kerak
+    use_ssl = None if DB_HOST in ("localhost", "127.0.0.1") else "require"
     return await asyncpg.create_pool(
         user=DB_USER,
         password=DB_PASSWORD,
         database=DB_NAME,
-        host=DB_HOST
+        host=DB_HOST,
+        ssl=use_ssl
     )
 
 
