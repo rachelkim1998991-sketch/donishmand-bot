@@ -82,6 +82,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"))
     builder.row(InlineKeyboardButton(text="➕ Yangi gap qo'shish", callback_data="admin_add"))
+    builder.row(InlineKeyboardButton(text="Orqaga qaytish", callback_data="admin_cancel"))
     return builder.as_markup()
 
 
@@ -145,11 +146,6 @@ async def main():
             quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
 
         welcome_text = ""
-        if bot_was_sleeping:
-            welcome_text += (
-                f"😴 {html.italic('Uyg`onish jarayoni muvaffaqiyatli yakunlandi!')}\n"
-                f"Botingiz biroz uxlab qolgan edi. Meni uyg`otganingiz uchun rahmat! ✨\n\n"
-            )
 
         welcome_text += f"Assalomu alaykum, {html.bold(message.from_user.full_name)}!\n\n"
         welcome_text += f"Kun hikmati:\n{quote}"
@@ -207,13 +203,17 @@ async def main():
     @dp.callback_query(F.data == "suggest_quote")
     async def start_suggestion(callback: CallbackQuery, state: FSMContext):
         await state.set_state(QuoteSuggestion.waiting_for_text)
-        await callback.message.answer(text="✍️ Marhamat, botga qo'shmoqchi bo'lgan gapni yozib yuboring:")
+        await callback.message.answer(text="✍️ Marhamat, botga qo'shmoqchi bo'lgan gapni yozib yuboring: (Yoki bekor qilish uchun /cancel):")
         await callback.answer()
 
     @dp.message(QuoteSuggestion.waiting_for_text)
     async def receive_suggestion_text(message: Message, state: FSMContext):
         await state.update_data(suggest_text=message.text)
         await state.set_state(QuoteSuggestion.waiting_for_category)
+        if message.text == "/cancel":
+            await state.clear()
+            await message.answer("Kerakli menyuni tanlang: ",reply_markup=get_user_keyboard())
+            return
 
         await message.answer(
             text="Kategoriyani tanlang:\nBu hikmatli gapmi yoki motivatsiyami?",
@@ -432,6 +432,32 @@ async def main():
         await state.update_data(quote_text=message.text)
         await state.set_state(AddQuoteStates.waiting_for_author)
         await message.answer(text="✍️ Endi ushbu gap muallifini yuboring (Agar noma'lum bo'lsa 'Noma'lum' deb yozing):")
+
+    @dp.callback_query(F.data == "admin_cancel")
+    async def admin_cancel_handler(callback: CallbackQuery, state: FSMContext):
+        # Agar admin biror holatda (state) turgan bo'lsa, uni tozalaymiz
+        await state.clear()
+
+        try:
+            quote = await get_random_quote(db_pool, category="hikmat")
+        except Exception as e:
+            logging.error(f"Bazadan hikmat olishda xato: {e}")
+            quote = "«Ilm qaytarish bilan, amal ixlos bilan tirikdir.»\n\n✍️ — Alisher Navoiy"
+
+        welcome_text = (
+            f"Hayrli kun, {html.bold(callback.from_user.full_name)}!\n\n"
+            f"Kun hikmati:\n{quote}"
+        )
+
+        # Joriy xabarni tahrirlab, asosiy menyuni chiqaramiz
+        await callback.message.edit_text(
+            text=welcome_text,
+            parse_mode="HTML",
+            reply_markup=get_user_keyboard()
+        )
+
+        # Tugmadagi yuklanish belgisini (soatni) o'chiramiz
+        await callback.answer()
 
     @dp.message(AddQuoteStates.waiting_for_author)
     async def process_quote_author(message: Message, state: FSMContext):
